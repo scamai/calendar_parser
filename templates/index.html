@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Event Text to Calendar Parser</title>
+    <style>
+        :root {
+            --primary-color: #4361ee;
+            --secondary-color: #3f37c9;
+            --accent-color: #4895ef;
+            --success-color: #4CAF50;
+            --error-color: #ff4444;
+            --text-color: #2b2d42;
+            --bg-color: #f8f9fa;
+        }
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            line-height: 1.6;
+        }
+        .spinner {
+            border: 6px solid rgba(0, 0, 0, 0.1);
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            border-left-color: #09f;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        textarea {
+            width: 100%;
+            height: 200px;
+            margin: 10px 0;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            line-height: 1.5;
+            transition: border-color 0.3s ease;
+            resize: vertical;
+        }
+        textarea:focus {
+            outline: none;
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 3px rgba(67, 97, 238, 0.1);
+        }
+        .event-preview {
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 15px 0;
+            background-color: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .event-preview:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        .event-preview h3 {
+            color: var(--primary-color);
+            margin-top: 0;
+        }
+        button {
+            padding: 12px 24px;
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        button:hover {
+            background-color: var(--secondary-color);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        .action-button {
+            background-color: var(--accent-color);
+        }
+        .action-button:hover {
+            background-color: var(--secondary-color);
+        }
+        .error-box {
+            border: 2px solid var(--error-color);
+            background-color: #ffeeee;
+            color: var(--error-color);
+            padding: 20px;
+            margin: 20px 0;
+            display: none;
+            border-radius: 8px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            word-break: break-word;
+            box-shadow: 0 2px 4px rgba(255,68,68,0.1);
+        }
+    </style>
+</head>
+<body>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h1 style="margin: 0;">Event Text to Calendar Parser</h1>
+        <div style="display: flex; gap: 15px; align-items: center;">
+            <select id="timezoneSelect" style="padding: 8px; border-radius: 4px; border: 1px solid #e0e0e0;">
+                <option value="America/Los_Angeles">PST (America/Los_Angeles)</option>
+                <option value="America/Denver">MT (America/Denver)</option>
+                <option value="America/New_York">EST (America/New_York)</option>
+                <option value="Asia/Shanghai">CST (Asia/Shanghai)</option>
+            </select>
+            <button onclick="generateICS()" id="downloadBtn" style="display: none; background-color: var(--accent-color);" class="action-button">Download Calendar File</button>
+        </div>
+    </div>
+    <p>Paste your text containing event information below. Time names will be automatically converted:</p>
+    <ul style="font-size: 0.9em; color: #666;">
+        <li>morning → 9:00-12:00</li>
+        <li>evening → 18:00-22:00</li>
+        <li>TBD/all day → 09:00-17:00</li>
+    </ul>
+    <textarea id="eventText" placeholder="Example:
+        Team Brainstorming Session
+        Description: Creative workshop for new project ideas
+        Date: 2024-01-20
+        Time: morning
+        Location: Innovation Lab
+
+        Project Review Meeting
+        Description: Monthly progress review
+        Date: 2024-01-21
+        Time: evening
+        Location: Conference Room B
+
+        All-Hands Meeting
+        Description: Company updates and announcements
+        Date: 2024-01-22
+        Time: TBD
+        Location: Main Hall"></textarea>
+    <button onclick="parseEvents()">Parse Events</button>
+    <div id="loading" style="display: none; margin: 20px 0;">
+        <div class="spinner"></div>
+        <p>Processing your request...</p>
+    </div>
+    <div id="preview"></div>
+    <div id="errorBox" class="error-box"></div>
+    <div id="icsPreview" style="font-family: monospace; white-space: pre-wrap; background-color: #f5f5f5; border: 1px solid #ddd; padding: 15px; margin: 20px 0; border-radius: 8px;">
+        <h3 style="color: var(--primary-color); margin-top: 0;">ICS Calendar Preview</h3>
+        <p style="color: #666;">Calendar content will appear here after parsing events.</p>
+    </div>
+    <script>
+        let parsedEvents = [];
+
+        async function parseEvents() {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('preview').innerHTML = '';
+            document.getElementById('errorBox').style.display = 'none';
+            document.getElementById('downloadBtn').style.display = 'none';
+            const text = document.getElementById('eventText').value;
+            
+            try {
+                const response = await fetch('/api/parse/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ text: text })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    const validEvents = [];
+                    const skippedEvents = [];
+                    
+                    data.events.forEach(event => {
+                        if (event.date && event.time) {
+                            validEvents.push(event);
+                        } else {
+                            skippedEvents.push(event.title || 'Untitled Event');
+                        }
+                    });
+                    
+                    parsedEvents = validEvents;
+                    
+                    if (skippedEvents.length > 0) {
+                        document.getElementById('errorBox').style.display = 'block';
+                        document.getElementById('errorBox').innerHTML = `Warning: The following events were skipped due to missing date or time:<br>- ${skippedEvents.join('<br>- ')}`;
+                    }
+                    
+                    if (validEvents.length > 0) {
+                        displayPreview();
+                        document.getElementById('downloadBtn').style.display = 'block';
+                        // Update ICS preview
+                        const icsContent = getICS();
+                        document.getElementById('icsPreview').innerHTML = `
+                            <h3 style="color: var(--primary-color); margin-top: 0;">ICS Calendar Preview</h3>
+                            <pre style="margin: 0; overflow-x: auto;">${icsContent}</pre>
+                        `;
+                    }
+                } else {
+                    document.getElementById('errorBox').style.display = 'block';
+                    document.getElementById('errorBox').innerHTML = `Error: ${data.error}<br><br>Details: ${data.detail}<br><br>Input Text: ${data.input_text || ''}`;
+                }
+            } catch (error) {
+                document.getElementById('errorBox').style.display = 'block';
+                document.getElementById('errorBox').innerHTML = `Error: Failed to parse event - ${error.message}<br><br>Please check your input format and try again.`;
+                console.error('Error:', error);
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        function displayPreview() {
+            const preview = document.getElementById('preview');
+            preview.innerHTML = '<h2>Parsed Events:</h2>';
+            
+            parsedEvents.forEach(event => {
+                const eventDiv = document.createElement('div');
+                eventDiv.className = 'event-preview';
+                eventDiv.innerHTML = `
+                    <h3>${event.title}</h3>
+                    <p><strong>Date:</strong> ${event.date}</p>
+                    <p><strong>Time:</strong> ${event.time}</p>
+                    ${event.description ? `<p><strong>Description:</strong> ${event.description}</p>` : ''}
+                    ${event.location ? `<p><strong>Location:</strong> ${event.location}</p>` : ''}
+                `;
+                preview.appendChild(eventDiv);
+            });
+        }
+        
+        function getICS(){
+            let icsContent = 'BEGIN:VCALENDAR\r\nVERSION:2.0\r\n';
+
+            parsedEvents.forEach(event => {
+                const { start, end } = parseDateTime(event.date, event.time);
+                icsContent += 'BEGIN:VEVENT\r\n';
+                icsContent += `SUMMARY:${event.title}\r\n`;
+                icsContent += `DTSTART:${formatDateTime(start, false)}\r\n`;
+                icsContent += `DTEND:${formatDateTime(end, false)}\r\n`;
+                if (event.description) icsContent += `DESCRIPTION:${event.description}\r\n`;
+                if (event.location) icsContent += `LOCATION:${event.location}\r\n`;
+                icsContent += `UID:${new Date().getTime()}-${Math.random().toString(36).substring(2)}\r\n`;
+                icsContent += 'END:VEVENT\r\n';
+            });
+
+            icsContent += 'END:VCALENDAR';
+            return icsContent;
+        }
+        
+
+        function generateICS() {
+            const icsContent = getICS();
+            const blob = new Blob([icsContent], { type: 'text/calendar' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'events.ics';
+            a.click();
+            window.URL.revokeObjectURL(url);
+        }
+
+        function parseDateTime(date, time) {
+            // Handle special time names
+            if (time.toLowerCase() === 'morning') {
+                time = '09:00-12:00';
+            } else if (time.toLowerCase() === 'evening') {
+                time = '18:00-22:00';
+            } else if (time.toLowerCase() === 'tbd' || time.toLowerCase() === 'all day') {
+                time = '09:00-17:00';
+            }
+
+            const timezone = document.getElementById('timezoneSelect').value;
+            const [startTime, endTime] = time.split('-');
+            const [startHours, startMinutes] = startTime.split(':');
+            
+            // Create dates in the selected timezone
+            const dateObj = new Date(date + 'T' + startTime + ':00');
+            const userTimezoneOffset = dateObj.getTimezoneOffset() * 60000;
+            const selectedTimezoneOffset = getTimezoneOffset(timezone) * 60000;
+            dateObj.setTime(dateObj.getTime() + userTimezoneOffset - selectedTimezoneOffset);
+
+            let endDate;
+            if (endTime) {
+                const [endHours, endMinutes] = endTime.split(':');
+                endDate = new Date(date + 'T' + endTime + ':00');
+                endDate.setTime(endDate.getTime() + userTimezoneOffset - selectedTimezoneOffset);
+            } else {
+                // Default 1 hour duration if no end time
+                endDate = new Date(dateObj.getTime() + 60 * 60 * 1000);
+            }
+
+            return {
+                start: dateObj,
+                end: endDate
+            };
+        }
+
+        function getTimezoneOffset(timezone) {
+            const now = new Date();
+            const timeString = now.toLocaleString('en-US', { timeZone: timezone });
+            const localTime = new Date(timeString);
+            return (now - localTime) / 60000;
+        }
+
+        function formatDateTime(date) {
+            // Format: YYYYMMDDTHHMMSS (no Z suffix for local time)
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const seconds = String(date.getSeconds()).padStart(2, '0');
+            
+            return `${year}${month}${day}T${hours}${minutes}${seconds}Z`;
+        }
+    </script>
+</body>
+</html>

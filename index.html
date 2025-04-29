@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Event Text to Calendar Parser</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        #icsPreview {
+            font-family: monospace;
+            white-space: pre-wrap;
+            background-color: #f5f5f5;
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin-top: 20px;
+            border-radius: 4px;
+            display: none;
+        }
+        
+        .spinner {
+            border: 6px solid rgba(0, 0, 0, 0.1);
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            border-left-color: #09f;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        textarea {
+            width: 100%;
+            height: 200px;
+            margin: 10px 0;
+        }
+        .event-preview {
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin: 10px 0;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .error-box {
+            border: 2px solid #ff4444;
+            background-color: #ffeeee;
+            color: #ff0000;
+            padding: 15px;
+            margin: 20px 0;
+            display: none;
+            border-radius: 4px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+    </style>
+</head>
+<body>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h1 style="margin: 0;">Event Text to Calendar Parser</h1>
+        <div style="display: flex; gap: 15px; align-items: center;">
+            <select id="timezoneSelect" style="padding: 8px; border-radius: 4px; border: 1px solid #ccc;">
+                <option value="America/Los_Angeles">Pacific Time</option>
+                <option value="America/Denver">Mountain Time</option>
+                <option value="America/Chicago">Central Time</option>
+                <option value="America/New_York">Eastern Time</option>
+                <option value="UTC">UTC</option>
+            </select>
+        </div>
+    </div>
+    <p>Paste your text containing event information below:</p>
+    <textarea id="eventText" placeholder="Example:
+Meeting with Team
+Description: Weekly status update meeting
+Date: 2024-01-20
+Time: 14:00-15:00
+Location: Conference Room A"></textarea>
+    <button onclick="parseEvents()">Parse Events</button>
+    <div id="loading" style="display: none; margin: 20px 0;">
+        <div class="spinner"></div>
+        <p>Processing your request...</p>
+    </div>
+    <div id="preview"></div>
+    <div id="errorBox" class="error-box"></div>
+    <button onclick="generateICS()" id="downloadBtn" style="display: none;">Download Calendar File</button>
+    <div id="icsPreview"></div>
+
+    <script>
+        let parsedEvents = [];
+
+        function parseEvents() {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('preview').innerHTML = '';
+            document.getElementById('errorBox').style.display = 'none';
+            document.getElementById('icsPreview').style.display = 'none';
+            const text = document.getElementById('eventText').value;
+            
+            try {
+                // Split text into paragraphs (blocks separated by blank lines)
+                const eventBlocks = text.trim().split(/\n\s*\n+/);
+                parsedEvents = [];
+                let hasError = false;
+
+                eventBlocks.forEach((block, index) => {
+                    const lines = block.trim().split('\n');
+                    if (lines.length === 0) return;
+
+                    const event = {
+                        title: lines[0].trim(),
+                        description: '',
+                        date: '',
+                        time: '',
+                        location: ''
+                    };
+
+                    lines.slice(1).forEach(line => {
+                        if (!line.includes(':')) return;
+                        const [key, ...valueParts] = line.split(':');
+                        const value = valueParts.join(':').trim();
+                        const lowerKey = key.trim().toLowerCase();
+                        
+                        if (lowerKey.includes('description')) event.description = value;
+                        else if (lowerKey.includes('date')) event.date = value;
+                        else if (lowerKey.includes('time')) event.time = value;
+                        else if (lowerKey.includes('location')) event.location = value;
+                    });
+
+                    if (event.title && (event.date || event.time)) {
+                        parsedEvents.push(event);
+                    } else {
+                        hasError = true;
+                        document.getElementById('errorBox').style.display = 'block';
+                        document.getElementById('errorBox').innerHTML += `Error in Event #${index + 1}:\n${JSON.stringify(event, null, 4)}\n\n`;
+                    }
+                });
+
+                if (!hasError && parsedEvents.length > 0) {
+                    document.getElementById('downloadBtn').style.display = 'block';
+                    // Generate and show ICS preview
+                    const timezone = 'UTC';
+                    let icsContent = 'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Your Company//Event Parser//EN\r\n';
+
+                    parsedEvents.forEach(event => {
+                        const dateTime = parseDateTime(event.date, event.time);
+                        const endDateTime = new Date(dateTime.getTime() + 60 * 60 * 1000); // Default 1 hour duration
+
+                        icsContent += 'BEGIN:VEVENT\r\n';
+                        icsContent += `SUMMARY:${event.title}\r\n`;
+                        icsContent += `DTSTART:${formatDateTime(dateTime)}\r\n`;
+                        icsContent += `DTEND:${formatDateTime(endDateTime)}\r\n`;
+                        if (event.description) icsContent += `DESCRIPTION:${event.description}\r\n`;
+                        if (event.location) icsContent += `LOCATION:${event.location}\r\n`;
+                        icsContent += `UID:${new Date().getTime()}-${Math.random().toString(36).substring(2)}\r\n`;
+                        icsContent += 'END:VEVENT\r\n';
+                    });
+
+                    icsContent += 'END:VCALENDAR';
+
+                    // Update ICS preview panel
+                    const icsPreview = document.getElementById('icsPreview');
+                    icsPreview.style.display = 'block';
+                    icsPreview.textContent = icsContent;
+                }
+            } catch (error) {
+                document.getElementById('errorBox').style.display = 'block';
+                document.getElementById('errorBox').innerHTML = `Error parsing events: ${error.message}`;
+            }
+
+            displayPreview();
+            document.getElementById('loading').style.display = 'none';
+        }
+
+
+        function displayPreview() {
+            const preview = document.getElementById('preview');
+            preview.innerHTML = '<h2>Parsed Events:</h2>';
+            
+            parsedEvents.forEach(event => {
+                const eventDiv = document.createElement('div');
+                eventDiv.className = 'event-preview';
+                eventDiv.innerHTML = `
+                    <h3>${event.title}</h3>
+                    <p><strong>Date:</strong> ${event.date}</p>
+                    <p><strong>Time:</strong> ${event.time}</p>
+                    ${event.description ? `<p><strong>Description:</strong> ${event.description}</p>` : ''}
+                    ${event.location ? `<p><strong>Location:</strong> ${event.location}</p>` : ''}
+                `;
+                preview.appendChild(eventDiv);
+            });
+        }
+
+        function generateICS() {
+            const timezone = 'UTC';
+            let icsContent = 'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Your Company//Event Parser//EN\r\n';
+
+            parsedEvents.forEach(event => {
+                const dateTime = parseDateTime(event.date, event.time);
+                const endDateTime = new Date(dateTime.getTime() + 60 * 60 * 1000); // Default 1 hour duration
+
+                icsContent += 'BEGIN:VEVENT\r\n';
+                icsContent += `SUMMARY:${event.title}\r\n`;
+                icsContent += `DTSTART:${formatDateTime(dateTime)}\r\n`;
+                icsContent += `DTEND:${formatDateTime(endDateTime)}\r\n`;
+                if (event.description) icsContent += `DESCRIPTION:${event.description}\r\n`;
+                if (event.location) icsContent += `LOCATION:${event.location}\r\n`;
+                icsContent += `UID:${new Date().getTime()}-${Math.random().toString(36).substring(2)}\r\n`;
+                icsContent += 'END:VEVENT\r\n';
+            });
+
+            icsContent += 'END:VCALENDAR';
+
+            // Update ICS preview panel
+            const icsPreview = document.getElementById('icsPreview');
+            icsPreview.style.display = 'block';
+            icsPreview.textContent = icsContent;
+
+            // Create and trigger download
+
+            const blob = new Blob([icsContent], { type: 'text/calendar' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'events.ics';
+            a.click();
+            window.URL.revokeObjectURL(url);
+        }
+
+        function parseDateTime(date, time) {
+            try {
+                const [startTime] = time.split('-');
+                const [hours, minutes] = startTime.split(':');
+                const timezone = document.getElementById('timezoneSelect').value;
+                const dateObj = new Date(date + 'T' + startTime + ':00');
+                const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                const offset = new Date().getTimezoneOffset();
+                dateObj.setMinutes(dateObj.getMinutes() + offset);
+                return dateObj;
+            } catch (error) {
+                document.getElementById('errorBox').style.display = 'block';
+                document.getElementById('errorBox').innerHTML = 'Error: Failed to parse date/time\n\nDetails:\n' + error.message + '\n\nStack Trace:\n' + error.stack;
+                throw error;
+            }
+        }
+
+        function formatDateTime(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const seconds = String(date.getSeconds()).padStart(2, '0');
+            return `${year}${month}${day}T${hours}${minutes}${seconds}`;
+        }
+    </script>
+</body>
+</html>
